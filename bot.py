@@ -1,13 +1,21 @@
 import asyncio
 import random
 import os
+import sys
 import pytz
 from datetime import datetime, timedelta
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
+# --- ADMIN CONFIG ---
+# Replace with your Telegram ID(s)
+ADMIN_IDS = [989025647]
+
+def is_admin(user_id):
+    return int(user_id) in ADMIN_IDS
+
 # --- CONFIGURATION ---
-TOKEN = os.environ.get("TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATA_FOLDER = "bot_records"
 USER_FILE = os.path.join(DATA_FOLDER, "users.txt")
 DATA_FILE = os.path.join(DATA_FOLDER, "productivity_log.txt")
@@ -71,23 +79,99 @@ def get_weekly_stats(chat_id):
 # --- HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(update.effective_chat.id)
-    welcome_text = (
-        "👋 *Hello Mignot!*\n\n"
-        "This bot is a gift from your lovely friend☺️. I know you are already crushing it but it is the only free gift that I can give. "
-        "Why?, well... It is because I am kind and smart and strong and lovely😎.\n\n"
-        "🩺 *Morning:* Medical facts & quotes at 8:30 AM.\n"
-        "🌙 *Evening:* Productivity check at 9:30 PM.\n"
-        "📊 *Weekly:* Check your consistency anytime with the button below.\n\n"
-        "The system is now *Active*. Please don't take it for granted—it's made with love! ❤️"
-    )
-    await update.message.reply_text(welcome_text, reply_markup=main_menu_keyboard, parse_mode='Markdown')
+    await update.message.reply_text("Bot is connected and working")
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📶 I'm online! The server hasn't expired yet.")
 
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("Access denied")
+        return
+    await update.message.reply_text("✅ You are an admin.")
+
+
+async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Your Telegram ID: {update.effective_user.id}")
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("Access denied")
+        return
+    if not os.path.exists(USER_FILE):
+        total = 0
+    else:
+        with open(USER_FILE, "r") as f:
+            total = len([l for l in f.read().splitlines() if l.strip()])
+    await update.message.reply_text(f"Total users: {total}")
+
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("Access denied")
+        return
+
+    # Obtain message text to broadcast
+    if context.args:
+        msg = " ".join(context.args)
+    else:
+        # if no args, try raw text after command
+        text = update.message.text or ""
+        parts = text.split(maxsplit=1)
+        msg = parts[1] if len(parts) > 1 else None
+
+    if not msg:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+
+    if not os.path.exists(USER_FILE):
+        await update.message.reply_text("No users to broadcast to.")
+        return
+
+    sent = 0
+    failed = 0
+    with open(USER_FILE, "r") as f:
+        for line in f:
+            uid = line.strip()
+            if not uid: continue
+            try:
+                await context.application.bot.send_message(chat_id=uid, text=msg)
+                sent += 1
+            except Exception:
+                failed += 1
+
+    await update.message.reply_text(f"Broadcast complete. Sent: {sent}. Failed: {failed}.")
+
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("Access denied")
+        return
+
+    await update.message.reply_text("Restarting bot...")
+
+    # Gracefully stop the application then re-exec the process
+    try:
+        await context.application.stop()
+        await context.application.shutdown()
+    except Exception:
+        pass
+
+    python = sys.executable
+    os.execv(python, [python] + sys.argv)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.effective_chat.id
+
+    # ensure we track every user that interacts
+    save_user(chat_id)
 
     if text == "Are you feeling discouraged? 😔":
         await update.message.reply_text(f"✨ _{random.choice(motivational_quotes)}_", parse_mode='Markdown')
@@ -141,15 +225,27 @@ async def scheduler_loop(app):
 
 async def main():
     initialize_storage()
-    app = ApplicationBuilder().token(TOKEN).build()
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is not set")
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Core handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("ping", ping_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
+    # Admin handlers
+    app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("id", id_command))
+    app.add_handler(CommandHandler("restart", restart_command))
+
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    await scheduler_loop(app)
+    asyncio.create_task(scheduler_loop(app))
+    await asyncio.Event().wait()
 
 if __name__ == '__main__':
     asyncio.run(main())
