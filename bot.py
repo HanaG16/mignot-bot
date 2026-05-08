@@ -4,11 +4,11 @@ import os
 import sys
 import pytz
 from datetime import datetime, timedelta
+from aiohttp import web                          # 👈 ADD THIS
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 # --- ADMIN CONFIG ---
-# Replace with your Telegram ID(s)
 ADMIN_IDS = [989025647]
 
 def is_admin(user_id):
@@ -37,9 +37,46 @@ med_facts = [
 ]
 
 motivational_quotes = [
-    "The way to get started is to quit talking and begin doing.",
-    "Don't stop when you're tired. Stop when you're done.",
-    "The pain you feel today will be the strength you feel tomorrow."
+    {
+        "quote": "The way to get started is to quit talking and begin doing.",
+        "tip": "💡 Pick ONE task right now and do it for just 5 minutes. Momentum builds itself."
+    },
+    {
+        "quote": "Don't stop when you're tired. Stop when you're done.",
+        "tip": "💡 Take a 10-minute walk, drink water, then return. Your brain needs oxygen, not a break."
+    },
+    {
+        "quote": "The pain you feel today will be the strength you feel tomorrow.",
+        "tip": "💡 Write down 3 things you accomplished today, no matter how small. Progress is progress."
+    },
+    {
+        "quote": "You didn't come this far to only come this far.",
+        "tip": "💡 Remind yourself WHY you started medicine. Reconnect with your purpose."
+    },
+    {
+        "quote": "Success is the sum of small efforts repeated day in and day out.",
+        "tip": "💡 Study for 25 minutes, rest for 5. The Pomodoro technique beats marathon sessions."
+    },
+    {
+        "quote": "Believe you can and you're halfway there.",
+        "tip": "💡 Replace 'I can't do this' with 'I can't do this YET.' Growth mindset changes everything."
+    },
+    {
+        "quote": "Hard days are the best because that's when champions are made.",
+        "tip": "💡 Talk to a classmate or friend. You're not alone — everyone struggles sometimes."
+    },
+    {
+        "quote": "Your limitation is only your imagination.",
+        "tip": "💡 Struggling with a topic? Try teaching it out loud to yourself. It reveals gaps fast."
+    },
+    {
+        "quote": "Dream it. Wish it. Do it.",
+        "tip": "💡 Set a specific goal for tomorrow night before you sleep. Vague goals don't get done."
+    },
+    {
+        "quote": "Great doctors were once struggling students. Keep going.",
+        "tip": "💡 Sleep at least 7 hours. Memory consolidation happens at night — rest is studying too."
+    },
 ]
 
 main_menu_keyboard = ReplyKeyboardMarkup(
@@ -57,24 +94,93 @@ def save_user(chat_id):
 
 def get_weekly_stats(chat_id):
     if not os.path.exists(DATA_FILE): return "No data yet!"
-    yes_count = 0
-    no_count = 0
+
+    today = datetime.now().date()
     seven_days_ago = datetime.now() - timedelta(days=7)
 
+    # Build a day-by-day map for the last 7 days
+    day_map = {}
     with open(DATA_FILE, "r") as f:
         for line in f:
             parts = line.strip().split(',')
             if len(parts) == 3 and parts[0] == str(chat_id):
-                log_date = datetime.strptime(parts[1], '%Y-%m-%d')
-                if log_date > seven_days_ago:
-                    if parts[2] == "yes": yes_count += 1
-                    else: no_count += 1
+                log_date = datetime.strptime(parts[1], '%Y-%m-%d').date()
+                if datetime.combine(log_date, datetime.min.time()) > seven_days_ago:
+                    day_map[log_date] = parts[2]  # last entry wins
 
+    yes_count = sum(1 for v in day_map.values() if v == "yes")
+    no_count  = sum(1 for v in day_map.values() if v == "no")
     total = yes_count + no_count
-    if total == 0: return "No logs for the past 7 days. Start today! 💪"
 
-    bar = "✅" * yes_count + "❌" * no_count
-    return f"📊 *Weekly Productivity*\n\nYes: {yes_count}\nNo: {no_count}\n\nProgress: {bar}\nKeep going, Doctor!"
+    if total == 0:
+        return "No logs for the past 7 days. Start today! 💪"
+
+    # --- Day-by-day row ---
+    day_row = ""
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        if d not in day_map:
+            day_row += "⬜"
+        elif day_map[d] == "yes":
+            day_row += "🟩"
+        else:
+            day_row += "🟥"
+
+    # --- Streak ---
+    streak = 0
+    for i in range(0, 7):
+        d = today - timedelta(days=i)
+        if day_map.get(d) == "yes":
+            streak += 1
+        else:
+            break
+
+    # --- Badge ---
+    if yes_count == 7:
+        badge = "🏆 LEGEND — Perfect Week!"
+    elif yes_count >= 5:
+        badge = "🥇 Gold — Outstanding!"
+    elif yes_count >= 4:
+        badge = "🥈 Silver — Great effort!"
+    elif yes_count >= 2:
+        badge = "🥉 Bronze — Keep building!"
+    else:
+        badge = "🌱 Beginner — Every expert started here!"
+
+    # --- Percentage bar ---
+    pct = int((yes_count / total) * 100)
+    filled = int(pct / 10)
+    bar = "🟦" * filled + "⬜" * (10 - filled)
+
+    return (
+        f"📊 *Weekly Productivity Report*\n"
+        f"━━━━━━━━━━━━━━━━\n\n"
+        f"📅 *Last 7 Days:*\n"
+        f"Mon▸Tue▸Wed▸Thu▸Fri▸Sat▸Sun\n"
+        f"{day_row}\n"
+        f"🟩 = Yes   🟥 = No   ⬜ = No log\n\n"
+        f"✅ Productive: *{yes_count}* days\n"
+        f"❌ Off days:   *{no_count}* days\n"
+        f"📈 Score: *{pct}%*\n"
+        f"{bar}\n\n"
+        f"🔥 Current Streak: *{streak} day{'s' if streak != 1 else ''}*\n\n"
+        f"🏅 *Badge:* {badge}\n\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"_Keep logging daily to grow your streak!_ 💪"
+    )
+
+# --- HEALTH CHECK SERVER ---              # 👈 ADD THIS WHOLE SECTION
+async def health(request):
+    return web.Response(text="OK")
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/health", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+    print("Health server running on port 8080")
 
 # --- HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84,7 +190,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📶 I'm online! The server hasn't expired yet.")
 
-
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id):
@@ -92,10 +197,8 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("✅ You are an admin.")
 
-
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Your Telegram ID: {update.effective_user.id}")
-
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -109,30 +212,23 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total = len([l for l in f.read().splitlines() if l.strip()])
     await update.message.reply_text(f"Total users: {total}")
 
-
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id):
         await update.message.reply_text("Access denied")
         return
-
-    # Obtain message text to broadcast
     if context.args:
         msg = " ".join(context.args)
     else:
-        # if no args, try raw text after command
         text = update.message.text or ""
         parts = text.split(maxsplit=1)
         msg = parts[1] if len(parts) > 1 else None
-
     if not msg:
         await update.message.reply_text("Usage: /broadcast <message>")
         return
-
     if not os.path.exists(USER_FILE):
         await update.message.reply_text("No users to broadcast to.")
         return
-
     sent = 0
     failed = 0
     with open(USER_FILE, "r") as f:
@@ -144,37 +240,30 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sent += 1
             except Exception:
                 failed += 1
-
     await update.message.reply_text(f"Broadcast complete. Sent: {sent}. Failed: {failed}.")
-
 
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id):
         await update.message.reply_text("Access denied")
         return
-
     await update.message.reply_text("Restarting bot...")
-
-    # Gracefully stop the application then re-exec the process
     try:
         await context.application.stop()
         await context.application.shutdown()
     except Exception:
         pass
-
     python = sys.executable
     os.execv(python, [python] + sys.argv)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.effective_chat.id
-
-    # ensure we track every user that interacts
     save_user(chat_id)
-
     if text == "Are you feeling discouraged? 😔":
-        await update.message.reply_text(f"✨ _{random.choice(motivational_quotes)}_", parse_mode='Markdown')
+        item = random.choice(motivational_quotes)
+        msg = f"✨ _{item['quote']}_\n\n{item['tip']}"
+        await update.message.reply_text(msg, parse_mode='Markdown')
     elif text == "Medical Words 🩺":
         fact = random.choice(med_facts)
         await update.message.reply_text(f"🧠 *{fact['term']}*: {fact['def']}", parse_mode='Markdown')
@@ -189,14 +278,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- SCHEDULER ---
 async def scheduler_loop(app):
     ethiopia_tz = pytz.timezone('Africa/Addis_Ababa')
-
     last_morning_sent = None
     last_evening_sent = None
-
     while True:
         now = datetime.now(ethiopia_tz)
         today = now.date()
-
         if now.hour == 8 and now.minute >= 30 and last_morning_sent != today:
             last_morning_sent = today
             for uid in open(USER_FILE).read().splitlines():
@@ -209,7 +295,6 @@ async def scheduler_loop(app):
                     )
                 except Exception as e:
                     print(f"Failed to send morning message to {uid}: {e}")
-
         if now.hour == 21 and now.minute >= 30 and last_evening_sent != today:
             last_evening_sent = today
             for uid in open(USER_FILE).read().splitlines():
@@ -220,7 +305,6 @@ async def scheduler_loop(app):
                     )
                 except Exception as e:
                     print(f"Failed to send evening message to {uid}: {e}")
-
         await asyncio.sleep(30)
 
 async def main():
@@ -228,13 +312,12 @@ async def main():
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is not set")
 
+    await start_health_server()              # 👈 ADD THIS LINE
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    # Core handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("ping", ping_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-
-    # Admin handlers
     app.add_handler(CommandHandler("admin", admin_command))
     app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(CommandHandler("stats", stats_command))
