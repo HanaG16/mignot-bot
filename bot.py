@@ -185,7 +185,17 @@ async def start_health_server():
 # --- HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(update.effective_chat.id)
-    await update.message.reply_text("Bot is connected and working")
+    await update.message.reply_text(
+        "👋 *Hello Mignot!*\n\n"
+        "This bot is a gift from your lovely friend☺️. I know you are already crushing it but it is the only free gift that I can give. "
+        "Why?, well... It is because I am kind and smart and strong and lovely😎.\n\n"
+        "🩺 *Morning:* Medical facts & quotes at 8:30 AM.\n"
+        "🌙 *Evening:* Productivity check at 9:30 PM.\n"
+        "📊 *Weekly:* Check your consistency anytime with the button below.\n\n"
+        "The system is now *Active*. Please don't take it for granted—it's made with love! ❤️",
+        parse_mode='Markdown',
+        reply_markup=main_menu_keyboard
+    )
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📶 I'm online! The server hasn't expired yet.")
@@ -260,20 +270,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.effective_chat.id
     save_user(chat_id)
+
     if text == "Are you feeling discouraged? 😔":
         item = random.choice(motivational_quotes)
         msg = f"✨ _{item['quote']}_\n\n{item['tip']}"
-        await update.message.reply_text(msg, parse_mode='Markdown')
+        await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=main_menu_keyboard)
     elif text == "Medical Words 🩺":
         fact = random.choice(med_facts)
-        await update.message.reply_text(f"🧠 *{fact['term']}*: {fact['def']}", parse_mode='Markdown')
+        await update.message.reply_text(f"🧠 *{fact['term']}*: {fact['def']}", parse_mode='Markdown', reply_markup=main_menu_keyboard)
     elif text == "Weekly Report 📊":
         stats = get_weekly_stats(chat_id)
-        await update.message.reply_text(stats, parse_mode='Markdown')
+        await update.message.reply_text(stats, parse_mode='Markdown', reply_markup=main_menu_keyboard)
     elif text.lower() in ["yes", "no"]:
         with open(DATA_FILE, "a") as f:
             f.write(f"{chat_id},{datetime.now().strftime('%Y-%m-%d')},{text.lower()}\n")
         await update.message.reply_text("🔥 Recorded! Keep pushing.", reply_markup=main_menu_keyboard)
+    else:
+        # Any other message → show menu                
+        await update.message.reply_text(
+            "Choose an option below 👇",
+            reply_markup=main_menu_keyboard
+        )
 
 # --- SCHEDULER ---
 async def scheduler_loop(app):
