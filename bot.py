@@ -15,7 +15,7 @@ def is_admin(user_id):
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = "https://60920007-2426-4d5b-aa41-c925c037ff84-dev.e1-us-east-azure.choreoapis.dev/default/mignot-bot/v1.0/webhook"
+WEBHOOK_URL = "https://mignot-bot.onrender.com/webhook"
 DATA_FOLDER = "bot_records"
 USER_FILE = os.path.join(DATA_FOLDER, "users.txt")
 DATA_FILE = os.path.join(DATA_FOLDER, "productivity_log.txt")
