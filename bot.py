@@ -4,7 +4,8 @@ import os
 import sys
 import pytz
 from datetime import datetime, timedelta
-from aiohttp import web                          # 👈 ADD THIS
+from flask import Flask
+from threading import Thread
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -169,18 +170,24 @@ def get_weekly_stats(chat_id):
         f"_Keep logging daily to grow your streak!_ 💪"
     )
 
-# --- HEALTH CHECK SERVER ---              # 👈 ADD THIS WHOLE SECTION
-async def health(request):
-    return web.Response(text="OK")
+# --- FLASK HEALTH SERVER ---
+flask_app = Flask(__name__)
 
-async def start_health_server():
-    app = web.Application()
-    app.router.add_get("/health", health)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 8080)
-    await site.start()
-    print("Health server running on port 8080")
+@flask_app.route("/")
+def home():
+    return "mignot-bot is running! ❤️"
+
+@flask_app.route("/health")
+def health():
+    return "OK"
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=8080)
+
+def start_flask():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
 
 # --- HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -329,7 +336,7 @@ async def main():
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is not set")
 
-    await start_health_server()              # 👈 ADD THIS LINE
+    start_flask()                            # 👈 starts Flask in background thread
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
