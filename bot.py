@@ -1,11 +1,9 @@
 import asyncio
 import random
 import os
-import sys
-import pytz
+import json
 from datetime import datetime, timedelta
-from flask import Flask
-from threading import Thread
+from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -17,6 +15,7 @@ def is_admin(user_id):
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = "https://60920007-2426-4d5b-aa41-c925c037ff84-dev.e1-us-east-azure.choreoapis.dev/default/mignot-bot/v1.0/webhook"
 DATA_FOLDER = "bot_records"
 USER_FILE = os.path.join(DATA_FOLDER, "users.txt")
 DATA_FILE = os.path.join(DATA_FOLDER, "productivity_log.txt")
@@ -34,7 +33,13 @@ med_facts = [
     {"term": "Idiopathic", "def": "A condition with an unknown cause."},
     {"term": "Hematopoiesis", "def": "The formation of blood cells."},
     {"term": "Homeostasis", "def": "Stable internal environment."},
-    {"term": "Anaphylaxis", "def": "A severe allergic reaction."}
+    {"term": "Anaphylaxis", "def": "A severe allergic reaction."},
+    {"term": "Tachycardia", "def": "Abnormally rapid heart rate."},
+    {"term": "Bradycardia", "def": "Abnormally slow heart rate."},
+    {"term": "Dyspnea", "def": "Difficulty or labored breathing."},
+    {"term": "Edema", "def": "Swelling caused by fluid in tissues."},
+    {"term": "Pathogen", "def": "A microorganism that causes disease."},
+    {"term": "Prognosis", "def": "The likely course of a disease."}
 ]
 
 motivational_quotes = [
@@ -93,13 +98,18 @@ def save_user(chat_id):
         with open(USER_FILE, "a") as f:
             f.write(f"{chat_id}\n")
 
+def get_all_users():
+    if not os.path.exists(USER_FILE):
+        return []
+    with open(USER_FILE, "r") as f:
+        return [l.strip() for l in f.read().splitlines() if l.strip()]
+
 def get_weekly_stats(chat_id):
     if not os.path.exists(DATA_FILE): return "No data yet!"
 
     today = datetime.now().date()
     seven_days_ago = datetime.now() - timedelta(days=7)
 
-    # Build a day-by-day map for the last 7 days
     day_map = {}
     with open(DATA_FILE, "r") as f:
         for line in f:
@@ -107,7 +117,7 @@ def get_weekly_stats(chat_id):
             if len(parts) == 3 and parts[0] == str(chat_id):
                 log_date = datetime.strptime(parts[1], '%Y-%m-%d').date()
                 if datetime.combine(log_date, datetime.min.time()) > seven_days_ago:
-                    day_map[log_date] = parts[2]  # last entry wins
+                    day_map[log_date] = parts[2]
 
     yes_count = sum(1 for v in day_map.values() if v == "yes")
     no_count  = sum(1 for v in day_map.values() if v == "no")
@@ -116,7 +126,6 @@ def get_weekly_stats(chat_id):
     if total == 0:
         return "No logs for the past 7 days. Start today! 💪"
 
-    # --- Day-by-day row ---
     day_row = ""
     for i in range(6, -1, -1):
         d = today - timedelta(days=i)
@@ -127,7 +136,6 @@ def get_weekly_stats(chat_id):
         else:
             day_row += "🟥"
 
-    # --- Streak ---
     streak = 0
     for i in range(0, 7):
         d = today - timedelta(days=i)
@@ -136,7 +144,6 @@ def get_weekly_stats(chat_id):
         else:
             break
 
-    # --- Badge ---
     if yes_count == 7:
         badge = "🏆 LEGEND — Perfect Week!"
     elif yes_count >= 5:
@@ -148,7 +155,6 @@ def get_weekly_stats(chat_id):
     else:
         badge = "🌱 Beginner — Every expert started here!"
 
-    # --- Percentage bar ---
     pct = int((yes_count / total) * 100)
     filled = int(pct / 10)
     bar = "🟦" * filled + "⬜" * (10 - filled)
@@ -170,24 +176,9 @@ def get_weekly_stats(chat_id):
         f"_Keep logging daily to grow your streak!_ 💪"
     )
 
-# --- FLASK HEALTH SERVER ---
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
-def home():
-    return "mignot-bot is running! ❤️"
-
-@flask_app.route("/health")
-def health():
-    return "OK"
-
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=8080)
-
-def start_flask():
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
+# --- BUILD APP ---
+initialize_storage()
+app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
 
 # --- HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,8 +199,7 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📶 I'm online! The server hasn't expired yet.")
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("Access denied")
         return
     await update.message.reply_text("✅ You are an admin.")
@@ -218,20 +208,14 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Your Telegram ID: {update.effective_user.id}")
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("Access denied")
         return
-    if not os.path.exists(USER_FILE):
-        total = 0
-    else:
-        with open(USER_FILE, "r") as f:
-            total = len([l for l in f.read().splitlines() if l.strip()])
+    total = len(get_all_users())
     await update.message.reply_text(f"Total users: {total}")
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("Access denied")
         return
     if context.args:
@@ -243,35 +227,14 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         await update.message.reply_text("Usage: /broadcast <message>")
         return
-    if not os.path.exists(USER_FILE):
-        await update.message.reply_text("No users to broadcast to.")
-        return
-    sent = 0
-    failed = 0
-    with open(USER_FILE, "r") as f:
-        for line in f:
-            uid = line.strip()
-            if not uid: continue
-            try:
-                await context.application.bot.send_message(chat_id=uid, text=msg)
-                sent += 1
-            except Exception:
-                failed += 1
+    sent = failed = 0
+    for uid in get_all_users():
+        try:
+            await context.application.bot.send_message(chat_id=uid, text=msg)
+            sent += 1
+        except Exception:
+            failed += 1
     await update.message.reply_text(f"Broadcast complete. Sent: {sent}. Failed: {failed}.")
-
-async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text("Access denied")
-        return
-    await update.message.reply_text("Restarting bot...")
-    try:
-        await context.application.stop()
-        await context.application.shutdown()
-    except Exception:
-        pass
-    python = sys.executable
-    os.execv(python, [python] + sys.argv)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -280,8 +243,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "Are you feeling discouraged? 😔":
         item = random.choice(motivational_quotes)
-        msg = f"✨ _{item['quote']}_\n\n{item['tip']}"
-        await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=main_menu_keyboard)
+        await update.message.reply_text(f"✨ _{item['quote']}_\n\n{item['tip']}", parse_mode='Markdown', reply_markup=main_menu_keyboard)
     elif text == "Medical Words 🩺":
         fact = random.choice(med_facts)
         await update.message.reply_text(f"🧠 *{fact['term']}*: {fact['def']}", parse_mode='Markdown', reply_markup=main_menu_keyboard)
@@ -293,66 +255,76 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f.write(f"{chat_id},{datetime.now().strftime('%Y-%m-%d')},{text.lower()}\n")
         await update.message.reply_text("🔥 Recorded! Keep pushing.", reply_markup=main_menu_keyboard)
     else:
-        # Any other message → show menu                
-        await update.message.reply_text(
-            "Choose an option below 👇",
-            reply_markup=main_menu_keyboard
-        )
+        await update.message.reply_text("Choose an option below 👇", reply_markup=main_menu_keyboard)
 
-# --- SCHEDULER ---
-async def scheduler_loop(app):
-    ethiopia_tz = pytz.timezone('Africa/Addis_Ababa')
-    last_morning_sent = None
-    last_evening_sent = None
-    while True:
-        now = datetime.now(ethiopia_tz)
-        today = now.date()
-        if now.hour == 8 and now.minute >= 30 and last_morning_sent != today:
-            last_morning_sent = today
-            for uid in open(USER_FILE).read().splitlines():
-                fact = random.choice(med_facts)
-                try:
-                    await app.bot.send_message(
-                        chat_id=uid,
-                        text=f"☀️ Good morning! Today's word:\n*{fact['term']}*: {fact['def']}",
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    print(f"Failed to send morning message to {uid}: {e}")
-        if now.hour == 21 and now.minute >= 30 and last_evening_sent != today:
-            last_evening_sent = today
-            for uid in open(USER_FILE).read().splitlines():
-                try:
-                    await app.bot.send_message(
-                        chat_id=uid,
-                        text="🌙 Was your day productive today? (Yes/No)"
-                    )
-                except Exception as e:
-                    print(f"Failed to send evening message to {uid}: {e}")
-        await asyncio.sleep(30)
+app.add_handler(CommandHandler("start", start_command))
+app.add_handler(CommandHandler("ping", ping_command))
+app.add_handler(CommandHandler("admin", admin_command))
+app.add_handler(CommandHandler("id", id_command))
+app.add_handler(CommandHandler("stats", stats_command))
+app.add_handler(CommandHandler("broadcast", broadcast_command))
+app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-async def main():
-    initialize_storage()
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN is not set")
+# --- FLASK APP ---
+flask_app = Flask(__name__)
 
-    start_flask()                            # 👈 starts Flask in background thread
+@flask_app.route("/")
+def home():
+    return "mignot-bot is running! ❤️"
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("ping", ping_command))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app.add_handler(CommandHandler("admin", admin_command))
-    app.add_handler(CommandHandler("broadcast", broadcast_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("id", id_command))
-    app.add_handler(CommandHandler("restart", restart_command))
+@flask_app.route("/health")
+def health():
+    return "OK"
 
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.get_json()
+    asyncio.run(process_update(data))
+    return "OK"
+
+@flask_app.route("/morning")
+def morning():
+    asyncio.run(send_morning())
+    return "OK"
+
+@flask_app.route("/evening")
+def evening():
+    asyncio.run(send_evening())
+    return "OK"
+
+# --- SCHEDULED MESSAGE FUNCTIONS ---
+async def send_morning():
+    for uid in get_all_users():
+        fact = random.choice(med_facts)
+        try:
+            await app.bot.send_message(
+                chat_id=uid,
+                text=f"☀️ Good morning! Today's word:\n*{fact['term']}*: {fact['def']}",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            print(f"Failed morning msg to {uid}: {e}")
+
+async def send_evening():
+    for uid in get_all_users():
+        try:
+            await app.bot.send_message(
+                chat_id=uid,
+                text="🌙 Was your day productive today? (Yes/No)"
+            )
+        except Exception as e:
+            print(f"Failed evening msg to {uid}: {e}")
+
+async def process_update(data):
+    update = Update.de_json(data, app.bot)
     await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    asyncio.create_task(scheduler_loop(app))
-    await asyncio.Event().wait()
+    await app.process_update(update)
+
+# --- SET WEBHOOK ON STARTUP ---
+async def set_webhook():
+    await app.bot.set_webhook(url=WEBHOOK_URL)
+    print(f"Webhook set to {WEBHOOK_URL}")
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(set_webhook())
+    flask_app.run(host="0.0.0.0", port=8080)
