@@ -1,3 +1,4 @@
+
 import asyncio
 import random
 import os
@@ -284,13 +285,27 @@ def webhook():
 
 @flask_app.route("/morning")
 def morning():
-    asyncio.run(send_morning())
-    return "OK"
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(send_morning())
+        loop.close()
+        return "Morning messages sent OK"
+    except Exception as e:
+        print(f"Morning error: {e}")
+        return f"Error: {e}", 500
 
 @flask_app.route("/evening")
 def evening():
-    asyncio.run(send_evening())
-    return "OK"
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(send_evening())
+        loop.close()
+        return "Evening messages sent OK"
+    except Exception as e:
+        print(f"Evening error: {e}")
+        return f"Error: {e}", 500
 
 # --- SCHEDULED MESSAGE FUNCTIONS ---
 async def send_morning():
