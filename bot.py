@@ -1,10 +1,10 @@
-
 import asyncio
 import random
 import os
 import json
 from datetime import datetime, timedelta
 from flask import Flask, request
+import threading
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -177,7 +177,20 @@ def get_weekly_stats(chat_id):
         f"_Keep logging daily to grow your streak!_ 💪"
     )
 
-# --- BUILD APP ---
+# --- SHARED EVENT LOOP ---
+loop = asyncio.new_event_loop()
+
+def run_loop():
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+# Start the event loop in a background thread
+t = threading.Thread(target=run_loop, daemon=True)
+t.start()
+
+def run_async(coro):
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future.result(timeout=30)
 initialize_storage()
 app = ApplicationBuilder().token(BOT_TOKEN).updater(None).build()
 
@@ -280,16 +293,13 @@ def health():
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    asyncio.run(process_update(data))
+    run_async(process_update(data))
     return "OK"
 
 @flask_app.route("/morning")
 def morning():
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(send_morning())
-        loop.close()
+        run_async(send_morning())
         return "Morning messages sent OK"
     except Exception as e:
         print(f"Morning error: {e}")
@@ -298,10 +308,7 @@ def morning():
 @flask_app.route("/evening")
 def evening():
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(send_evening())
-        loop.close()
+        run_async(send_evening())
         return "Evening messages sent OK"
     except Exception as e:
         print(f"Evening error: {e}")
@@ -340,6 +347,6 @@ async def set_webhook():
     await app.bot.set_webhook(url=WEBHOOK_URL)
     print(f"Webhook set to {WEBHOOK_URL}")
 
-if __name__ == '__main__':
-    asyncio.run(set_webhook())
-    flask_app.run(host="0.0.0.0", port=8080)
+# Initialize app and set webhook using the shared loop
+asyncio.run_coroutine_threadsafe(app.initialize(), loop).result(timeout=30)
+asyncio.run_coroutine_threadsafe(set_webhook(), loop).result(timeout=30)
