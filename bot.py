@@ -1,13 +1,9 @@
-import asyncio
-import random
 import os
-import json
+import random
+import logging
 from datetime import datetime, timedelta
 from flask import Flask, request
-import threading
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-
+import requests as req
 # --- ADMIN CONFIG ---
 ADMIN_IDS = [989025647]
 
